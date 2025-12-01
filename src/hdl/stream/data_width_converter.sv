@@ -5,10 +5,12 @@
 /**
  * Converts an ndata_i stream to a different width.
  *
- * Currently only same input and output width and 8 to 16 elements is supported.
+ * 8->16 & 16->8 supported
  */
 module NDataWidthConverter #(
-    parameter type data_t
+    parameter type data_t,
+    parameter IN_WIDTH,
+    parameter OUT_WIDTH
 ) (
     input logic clk,
     input logic rst_n,
@@ -17,14 +19,13 @@ module NDataWidthConverter #(
     ndata_i.m out // #(data_t, OUT_WIDTH)
 );
 
-localparam IN_WIDTH  = in.NUM_ELEMENTS;
-localparam OUT_WIDTH = out.NUM_ELEMENTS;
-
-`ASSERT_ELAB(IN_WIDTH == OUT_WIDTH || IN_WIDTH == 8 && OUT_WIDTH == 16)
-
 generate if (IN_WIDTH == OUT_WIDTH) begin
-    `DATA_ASSIGN(in, out)
+
+`DATA_ASSIGN(in, out)
+
 end else if (IN_WIDTH == 8 && OUT_WIDTH == 16) begin
+    // 8 -> 16 conversion 
+
     logic is_upper, n_is_upper;
 
     data_t[OUT_WIDTH - 1:0] data,  n_data;
@@ -70,7 +71,6 @@ end else if (IN_WIDTH == 8 && OUT_WIDTH == 16) begin
                 n_data[7:0]  = in.data;
                 n_keep[15:8] = '0;
                 n_keep[7:0]  = in.keep;
-                
                 if (in.last) begin
                     n_valid = in.valid;
                 end
@@ -90,6 +90,53 @@ end else if (IN_WIDTH == 8 && OUT_WIDTH == 16) begin
     assign out.keep  = keep;
     assign out.last  = last;
     assign out.valid = valid;
+
+end else if (IN_WIDTH == 16 && OUT_WIDTH == 8) begin
+    // 16 -> 8 conversion
+    logic has_upper, n_has_upper;
+    data_t[OUT_WIDTH - 1:0] upper_data,  n_upper_data;
+    logic[OUT_WIDTH - 1:0]  upper_keep,  n_upper_keep;
+    logic                   upper_last,  n_upper_last;
+
+    always_ff @(posedge clk) begin
+        if (rst_n == 1'b0) begin
+            has_upper <= 1'b0;
+        end else begin
+            has_upper <= n_has_upper;
+            upper_data  <= n_upper_data;
+            upper_keep  <= n_upper_keep;
+            upper_last  <= n_upper_last;
+        end
+    end
+
+    always_comb begin
+        n_has_upper = has_upper;
+        n_upper_data = upper_data;
+        n_upper_keep = upper_keep;
+        n_upper_last = upper_last;
+
+        if (out.ready && has_upper) begin
+            // Output stored upper
+            n_has_upper = 1'b0;
+        end else if (in.valid && !has_upper && out.ready) begin
+            // input is valid => output lower half, store upper half for next cycle
+            n_has_upper = 1'b1;
+            n_upper_data = in.data[15:8];
+            n_upper_keep = in.keep[15:8];
+            n_upper_last = in.last;
+        end 
+    end
+
+    assign in.ready = out.ready && !has_upper;
+
+    assign out.data  = has_upper ? upper_data : in.data[7:0];
+    assign out.keep  = has_upper ? upper_keep : in.keep[7:0];
+    assign out.last  = has_upper & upper_last;
+
+    assign out.valid = has_upper || in.valid;
+
+end else begin
+    initial $error("NDataWidthConverter: unsupported");
 end endgenerate
 
 endmodule
