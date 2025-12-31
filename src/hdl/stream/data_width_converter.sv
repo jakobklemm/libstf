@@ -8,9 +8,7 @@
  * 8->16 & 16->8 supported
  */
 module NDataWidthConverter #(
-    parameter type data_t,
-    parameter IN_WIDTH,
-    parameter OUT_WIDTH
+    parameter type data_t
 ) (
     input logic clk,
     input logic rst_n,
@@ -18,6 +16,9 @@ module NDataWidthConverter #(
     ndata_i.s in, // #(data_t, IN_WIDTH)
     ndata_i.m out // #(data_t, OUT_WIDTH)
 );
+
+localparam IN_WIDTH = in.NUM_ELEMENTS;
+localparam OUT_WIDTH = out.NUM_ELEMENTS;
 
 generate if (IN_WIDTH == OUT_WIDTH) begin
 
