@@ -10,6 +10,7 @@
 
 #include "libstf/common.hpp"
 #include "libstf/buffer.hpp"
+#include "libstf/util.hpp"
 
 namespace libstf {
 
@@ -31,7 +32,7 @@ std::ostream& operator<<(std::ostream& out, const std::vector<ConfigRegister>& c
 
 class Config {
 public:
-    Config(std::shared_ptr<coyote::cThread> cthread, uint32_t addr_offset);
+    Config(std::shared_ptr<coyote::cThread> cthread, uint32_t addr_offset, uint32_t num_regs);
 
     /**
      * Read configuration value from addr starting at addr_offset.
@@ -42,9 +43,10 @@ public:
 
     static constexpr uint64_t ID = -1;
 
-private:
+protected:
     std::shared_ptr<coyote::cThread> cthread;
     uint32_t addr_offset;
+    uint32_t num_regs;
 };
 
 class GlobalConfig : private Config {
@@ -68,17 +70,38 @@ public:
 
     uint64_t system_id() { return system_id_; }
 
+    template <typename T> std::shared_ptr<T> get_config() {
+        static_assert(std::is_base_of_v<Config, T>, "T must derive from libstf::Config");
+
+        auto it = configs_.find(T::ID);
+        if (it == configs_.end()) {
+            if (!has_config(T::ID)) {
+                auto name = demangle_type_name(typeid(T).name());
+                throw std::runtime_error("Hardware design on device has no configuration " + name + 
+                    "(ID=" + std::to_string(T::ID) + ") which we were trying to get");
+            }
+
+            auto bounds = get_config_bounds(T::ID);
+            auto addr_offset = std::get<0>(bounds);
+            auto num_regs = std::get<1>(bounds) - addr_offset;
+            configs_[T::ID] = std::make_shared<T>(cthread, addr_offset, num_regs);
+        }
+
+        return std::static_pointer_cast<T>(configs_[T::ID]);
+    }
+
 private:
     uint64_t system_id_;
     uint32_t num_configs_;
 
     std::vector<uint64_t> config_ids;
     std::vector<uint32_t> config_bounds;
+    std::unordered_map<uint64_t, std::shared_ptr<Config>> configs_;
 };
 
 class MemConfig : public Config {
 public:
-    MemConfig(std::shared_ptr<coyote::cThread> cthread, uint32_t addr_offset);
+    MemConfig(std::shared_ptr<coyote::cThread> cthread, uint32_t addr_offset, uint32_t num_regs);
 
     /**
      * Writes the CSR registers to add a new buffer to the FPGA for the given stream.
@@ -94,15 +117,18 @@ public:
 
     const stream_t num_streams() const { return num_streams_; }
 
+    const size_t maximum_num_enqueued_buffers() const { return maximum_num_enqueued_buffers_; }
+
     static constexpr uint64_t ID = 0;
 
 private:
     stream_t num_streams_;
+    size_t maximum_num_enqueued_buffers_;
 };
 
 class StreamConfig : public Config {
 public:
-    StreamConfig(std::shared_ptr<coyote::cThread> cthread, uint32_t addr_offset);
+    StreamConfig(std::shared_ptr<coyote::cThread> cthread, uint32_t addr_offset, uint32_t num_regs);
 
     void enqueue_stream_config(stream_t stream_id, type_t type, uint8_t select);
 
